@@ -1,0 +1,162 @@
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Satoshi:wght@300..700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("/assets/fonts/BricolageGrotesque.woff2") format("woff2");
+  font-weight: 200 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/assets/fonts/Satoshi.woff2") format("woff2");
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --background: 0.09 0.018 260;
+    --foreground: 0.95 0.008 240;
+    --card: 0.13 0.022 260;
+    --card-foreground: 0.95 0.008 240;
+    --popover: 0.11 0.02 260;
+    --popover-foreground: 0.95 0.008 240;
+    --primary: 0.78 0.19 212;
+    --primary-foreground: 0.08 0.01 260;
+    --secondary: 0.16 0.025 260;
+    --secondary-foreground: 0.85 0.01 240;
+    --muted: 0.16 0.02 260;
+    --muted-foreground: 0.55 0.015 250;
+    --accent: 0.82 0.2 212;
+    --accent-foreground: 0.08 0.01 260;
+    --destructive: 0.6 0.22 25;
+    --destructive-foreground: 0.98 0.005 0;
+    --success: 0.72 0.18 145;
+    --success-foreground: 0.08 0.01 145;
+    --border: 0.22 0.025 260;
+    --input: 0.17 0.022 260;
+    --ring: 0.78 0.19 212;
+    --radius: 0.75rem;
+    --chart-1: 0.78 0.19 212;
+    --chart-2: 0.72 0.18 145;
+    --chart-3: 0.6 0.22 25;
+    --chart-4: 0.82 0.15 280;
+    --chart-5: 0.75 0.17 60;
+    --sidebar: 0.11 0.018 260;
+    --sidebar-foreground: 0.95 0.008 240;
+    --sidebar-primary: 0.78 0.19 212;
+    --sidebar-primary-foreground: 0.08 0.01 260;
+    --sidebar-accent: 0.16 0.025 260;
+    --sidebar-accent-foreground: 0.85 0.01 240;
+    --sidebar-border: 0.22 0.025 260;
+    --sidebar-ring: 0.78 0.19 212;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+  html {
+    @apply dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Satoshi", "Bricolage Grotesque", sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+}
+
+@layer components {
+  .vpay-app {
+    @apply min-h-screen flex flex-col items-center justify-start;
+    background: radial-gradient(
+        ellipse at 20% 0%,
+        oklch(0.15 0.05 240 / 0.6) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse at 80% 100%,
+        oklch(0.12 0.04 260 / 0.5) 0%,
+        transparent 60%
+      ), oklch(0.09 0.018 260);
+  }
+  .vpay-screen {
+    @apply w-full max-w-[430px] mx-auto min-h-screen flex flex-col relative;
+  }
+  .vpay-card {
+    @apply rounded-2xl border border-border/50 bg-card;
+    backdrop-filter: blur(12px);
+  }
+  .vpay-glow {
+    box-shadow: 0 0 30px oklch(0.78 0.19 212 / 0.2), 0 0 60px
+      oklch(0.78 0.19 212 / 0.08);
+  }
+  .vpay-btn-primary {
+    @apply bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3 transition-all duration-200;
+    box-shadow: 0 4px 20px oklch(0.78 0.19 212 / 0.4);
+  }
+  .vpay-btn-primary:hover {
+    box-shadow: 0 4px 30px oklch(0.78 0.19 212 / 0.6);
+    transform: translateY(-1px);
+  }
+  .balance-display {
+    background: linear-gradient(
+      135deg,
+      oklch(0.78 0.19 212 / 0.15),
+      oklch(0.82 0.2 212 / 0.05)
+    );
+    border: 1px solid oklch(0.78 0.19 212 / 0.3);
+    @apply rounded-3xl p-6;
+  }
+  .pin-dot {
+    @apply w-4 h-4 rounded-full border-2 transition-all duration-200;
+  }
+  .pin-dot.filled {
+    @apply bg-primary border-primary;
+    box-shadow: 0 0 10px oklch(0.78 0.19 212 / 0.5);
+  }
+  .pin-dot.empty {
+    @apply border-border;
+  }
+  .numpad-btn {
+    @apply w-full aspect-square rounded-2xl flex items-center justify-center text-xl font-semibold transition-all duration-150 select-none;
+    background: oklch(0.15 0.022 260);
+    border: 1px solid oklch(0.22 0.025 260);
+  }
+  .numpad-btn:hover {
+    background: oklch(0.18 0.03 260);
+  }
+  .numpad-btn:active {
+    background: oklch(0.22 0.035 260);
+    transform: scale(0.95);
+  }
+  .pattern-dot {
+    @apply w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-150;
+    background: oklch(0.15 0.022 260);
+    border: 2px solid oklch(0.3 0.03 260);
+  }
+  .pattern-dot.selected {
+    background: oklch(0.78 0.19 212);
+    border-color: oklch(0.82 0.2 212);
+    box-shadow: 0 0 15px oklch(0.78 0.19 212 / 0.6);
+  }
+  .action-grid-btn {
+    @apply flex flex-col items-center gap-2 p-4 rounded-2xl transition-all duration-200 cursor-pointer select-none;
+    background: oklch(0.13 0.022 260);
+    border: 1px solid oklch(0.2 0.025 260 / 0.6);
+  }
+  .action-grid-btn:hover {
+    background: oklch(0.16 0.03 260);
+    border-color: oklch(0.78 0.19 212 / 0.3);
+  }
+  .action-grid-btn:active {
+    transform: scale(0.96);
+  }
+}
