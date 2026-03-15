@@ -32,16 +32,19 @@ export default function QRScanner({ onScan, onBack }: Props) {
   const handledRef = useRef(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: start on mount only
   useEffect(() => {
     startScanning();
     return () => {
       stopScanning();
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   }, []);
 
-  // Detect permission denied error and keep retrying
+  // Detect permission denied error and auto-retry up to 5 times
   useEffect(() => {
     if (error) {
       const msg = error.message?.toLowerCase() || "";
@@ -52,21 +55,40 @@ export default function QRScanner({ onScan, onBack }: Props) {
         msg.includes("not allowed")
       ) {
         setPermissionDenied(true);
+        // Auto-retry loop
+        if (retryCountRef.current < 5) {
+          retryCountRef.current += 1;
+          retryTimerRef.current = setTimeout(async () => {
+            try {
+              await navigator.mediaDevices.getUserMedia({ video: true });
+            } catch {
+              // still denied
+            }
+            startScanning();
+          }, 2000);
+        }
       }
     } else {
       setPermissionDenied(false);
+      retryCountRef.current = 0;
     }
-  }, [error]);
+  }, [error, startScanning]);
 
   const handleRequestPermission = async () => {
     setRetrying(true);
     setPermissionDenied(false);
+    retryCountRef.current = 0;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     try {
       await navigator.mediaDevices.getUserMedia({ video: true });
     } catch {
       // permission still denied
     }
-    await startScanning();
+    const success = await startScanning();
+    if (!success && !isActive) {
+      // Still no camera - show informative message
+      setPermissionDenied(true);
+    }
     setRetrying(false);
   };
 
@@ -137,6 +159,11 @@ export default function QRScanner({ onScan, onBack }: Props) {
                   V-PAY needs camera access to scan QR codes. Please allow
                   camera permission when prompted.
                 </p>
+                {retryCountRef.current > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Auto-retrying... ({retryCountRef.current}/5 attempts)
+                  </p>
+                )}
               </div>
               <Button
                 type="button"
@@ -163,6 +190,7 @@ export default function QRScanner({ onScan, onBack }: Props) {
               <video
                 ref={videoRef}
                 className="w-full h-full object-cover"
+                autoPlay
                 playsInline
                 muted
               />
