@@ -1,8 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { useQRScanner } from "@/qr-code/useQRScanner";
-import { ArrowLeft, FlipHorizontal } from "lucide-react";
+import { ArrowLeft, Camera, FlipHorizontal } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface Props {
   onScan: (phone: string) => void;
@@ -30,6 +30,8 @@ export default function QRScanner({ onScan, onBack }: Props) {
   });
 
   const handledRef = useRef(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: start on mount only
   useEffect(() => {
@@ -38,6 +40,35 @@ export default function QRScanner({ onScan, onBack }: Props) {
       stopScanning();
     };
   }, []);
+
+  // Detect permission denied error and keep retrying
+  useEffect(() => {
+    if (error) {
+      const msg = error.message?.toLowerCase() || "";
+      if (
+        msg.includes("permission") ||
+        msg.includes("denied") ||
+        msg.includes("notallowed") ||
+        msg.includes("not allowed")
+      ) {
+        setPermissionDenied(true);
+      }
+    } else {
+      setPermissionDenied(false);
+    }
+  }, [error]);
+
+  const handleRequestPermission = async () => {
+    setRetrying(true);
+    setPermissionDenied(false);
+    try {
+      await navigator.mediaDevices.getUserMedia({ video: true });
+    } catch {
+      // permission still denied
+    }
+    await startScanning();
+    setRetrying(false);
+  };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: handle scan once
   useEffect(() => {
@@ -50,6 +81,19 @@ export default function QRScanner({ onScan, onBack }: Props) {
   }, [qrResults]);
 
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  const isPermissionError =
+    permissionDenied ||
+    (!!error &&
+      (() => {
+        const msg = error.message?.toLowerCase() || "";
+        return (
+          msg.includes("permission") ||
+          msg.includes("denied") ||
+          msg.includes("notallowed") ||
+          msg.includes("not allowed")
+        );
+      })());
 
   return (
     <div className="vpay-screen bg-background flex flex-col">
@@ -74,6 +118,41 @@ export default function QRScanner({ onScan, onBack }: Props) {
               Go Back
             </Button>
           </div>
+        ) : isPermissionError ? (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-sm text-center"
+            data-ocid="scanner.error_state"
+          >
+            <div className="flex flex-col items-center gap-5 p-6 rounded-2xl border border-border bg-muted/40">
+              <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center">
+                <Camera size={32} className="text-destructive" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg mb-1">
+                  Camera Permission Required
+                </h3>
+                <p className="text-muted-foreground text-sm">
+                  V-PAY needs camera access to scan QR codes. Please allow
+                  camera permission when prompted.
+                </p>
+              </div>
+              <Button
+                type="button"
+                className="w-full vpay-btn-primary"
+                onClick={handleRequestPermission}
+                disabled={retrying}
+                data-ocid="scanner.primary_button"
+              >
+                {retrying ? "Requesting..." : "Allow Camera Access"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                If the browser does not prompt, open your browser settings and
+                enable camera permission for this site.
+              </p>
+            </div>
+          </motion.div>
         ) : (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -116,7 +195,7 @@ export default function QRScanner({ onScan, onBack }: Props) {
               )}
             </div>
 
-            {error && (
+            {error && !isPermissionError && (
               <div
                 className="mt-3 text-center text-destructive text-sm"
                 data-ocid="scanner.error_state"
