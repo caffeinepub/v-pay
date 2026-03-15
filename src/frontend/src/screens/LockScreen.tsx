@@ -9,9 +9,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Storage } from "@/lib/storage";
-import { Delete, Fingerprint, KeyRound } from "lucide-react";
+import { Check, Delete, Fingerprint, KeyRound } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useRef, useState } from "react";
+import { toast } from "sonner";
 
 interface Props {
   onUnlock: () => void;
@@ -52,6 +53,7 @@ function RecoveryModal({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [birthdate, setBirthdate] = useState("");
+  const [passkey, setPasskey] = useState("");
   const [identityError, setIdentityError] = useState("");
   const [newPin, setNewPin] = useState("");
   const [newPattern, setNewPattern] = useState<number[]>([]);
@@ -70,6 +72,7 @@ function RecoveryModal({
     setPhone("");
     setEmail("");
     setBirthdate("");
+    setPasskey("");
     setIdentityError("");
     setNewPin("");
     setConfirmPin("");
@@ -91,7 +94,9 @@ function RecoveryModal({
     const emailMatch =
       email.trim().toLowerCase() === (user.email ?? "").toLowerCase();
     const dobMatch = birthdate === user.birthdate;
-    if (phoneMatch && emailMatch && dobMatch) {
+    const passkeyMatch =
+      !security?.recoveryPasskey || passkey === security.recoveryPasskey;
+    if (phoneMatch && emailMatch && dobMatch && passkeyMatch) {
       setIdentityError("");
       if (security?.type === "pattern") {
         setStep("set-pattern");
@@ -248,6 +253,23 @@ function RecoveryModal({
                   className="h-9 text-sm"
                 />
               </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">
+                  6-Digit Recovery Passkey
+                </Label>
+                <Input
+                  data-ocid="recovery.passkey.input"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={passkey}
+                  onChange={(e) =>
+                    setPasskey(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  placeholder="••••••"
+                  className="h-9 text-sm text-center tracking-widest"
+                />
+              </div>
               {identityError && (
                 <p
                   data-ocid="recovery.identity.error_state"
@@ -359,7 +381,7 @@ function RecoveryModal({
               </p>
               <div
                 ref={gridRef}
-                className="grid grid-cols-3 gap-6 p-4 select-none touch-none"
+                className="grid grid-cols-3 gap-8 p-4 select-none touch-none"
                 onMouseDown={startDraw}
                 onMouseMove={moveDraw}
                 onMouseUp={endDraw}
@@ -629,7 +651,7 @@ export default function LockScreen({ onUnlock }: Props) {
             </p>
             <div
               ref={gridRef}
-              className="grid grid-cols-3 gap-6 p-4 select-none touch-none"
+              className="grid grid-cols-3 gap-8 p-4 select-none touch-none"
               onMouseDown={startDraw}
               onMouseMove={moveDraw}
               onMouseUp={endDraw}
@@ -687,16 +709,6 @@ export default function LockScreen({ onUnlock }: Props) {
           Biometric (optional)
         </span>
       </button>
-
-      <Button
-        data-ocid="lock.unlock_button"
-        variant="ghost"
-        size="sm"
-        className="mt-4 text-muted-foreground text-xs"
-        onClick={onUnlock}
-      >
-        Use another method
-      </Button>
 
       <RecoveryModal
         open={recoveryOpen}

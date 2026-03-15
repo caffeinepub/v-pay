@@ -1,19 +1,475 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Storage } from "@/lib/storage";
-import { ArrowLeft, Edit2, ExternalLink, Plus, Save, X } from "lucide-react";
-import { motion } from "motion/react";
+import {
+  ArrowLeft,
+  CheckCircle,
+  DatabaseBackup,
+  Edit2,
+  ExternalLink,
+  LogOut,
+  Plus,
+  Save,
+  Shield,
+  X,
+} from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
+const PATTERN_SIZE = 3;
+const PATTERN_POSITIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+
 interface Props {
   onBack: () => void;
+  onLogout: () => void;
 }
 
-export default function ProfileScreen({ onBack }: Props) {
+function ChangeSecurityDialog() {
+  const [open, setOpen] = useState(false);
+  const [secType, setSecType] = useState<"pin" | "pattern">("pin");
+
+  // PIN state
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinError, setPinError] = useState("");
+
+  // Pattern state
+  const [newPattern, setNewPattern] = useState<number[]>([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [drawingPhase, setDrawingPhase] = useState<"first" | "confirm">(
+    "first",
+  );
+  const [firstPattern, setFirstPattern] = useState<number[]>([]);
+  const [patternError, setPatternError] = useState("");
+  const [patternDone, setPatternDone] = useState(false);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const resetState = () => {
+    setSecType("pin");
+    setNewPin("");
+    setConfirmPin("");
+    setPinError("");
+    setNewPattern([]);
+    setFirstPattern([]);
+    setDrawingPhase("first");
+    setPatternError("");
+    setPatternDone(false);
+    setIsDrawing(false);
+  };
+
+  const handleOpenChange = (v: boolean) => {
+    if (!v) resetState();
+    setOpen(v);
+  };
+
+  const handleSecTypeChange = (v: string) => {
+    setSecType(v as "pin" | "pattern");
+    setPinError("");
+    setNewPin("");
+    setConfirmPin("");
+    setNewPattern([]);
+    setFirstPattern([]);
+    setDrawingPhase("first");
+    setPatternError("");
+    setPatternDone(false);
+  };
+
+  const handleSavePin = () => {
+    if (newPin.length !== 6) {
+      setPinError("PIN must be exactly 6 digits.");
+      return;
+    }
+    if (newPin !== confirmPin) {
+      setPinError("PINs do not match. Please try again.");
+      return;
+    }
+    const existing = Storage.getSecurity();
+    Storage.setSecurity({
+      ...(existing ?? {
+        type: "pin",
+        pin: "",
+        pattern: [],
+        adminPassword: "admin123",
+        securityQA: [],
+        biometricEnabled: false,
+      }),
+      type: "pin",
+      pin: newPin,
+    });
+    toast.success("PIN updated successfully!");
+    handleOpenChange(false);
+  };
+
+  const getDotIndex = (clientX: number, clientY: number): number => {
+    const grid = gridRef.current;
+    if (!grid) return -1;
+    const rect = grid.getBoundingClientRect();
+    const cellW = rect.width / PATTERN_SIZE;
+    const cellH = rect.height / PATTERN_SIZE;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const col = Math.floor(x / cellW);
+    const row = Math.floor(y / cellH);
+    if (col < 0 || col >= PATTERN_SIZE || row < 0 || row >= PATTERN_SIZE)
+      return -1;
+    return row * PATTERN_SIZE + col;
+  };
+
+  const addDot = (idx: number) => {
+    if (idx < 0) return;
+    setNewPattern((prev) => (prev.includes(idx) ? prev : [...prev, idx]));
+  };
+
+  const startDraw = (e: React.MouseEvent | React.TouchEvent) => {
+    setIsDrawing(true);
+    setPatternError("");
+    const point = "touches" in e ? e.touches[0] : e;
+    addDot(getDotIndex(point.clientX, point.clientY));
+  };
+
+  const moveDraw = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDrawing) return;
+    e.preventDefault();
+    const point = "touches" in e ? e.touches[0] : e;
+    addDot(getDotIndex(point.clientX, point.clientY));
+  };
+
+  const endDraw = () => {
+    setIsDrawing(false);
+    if (newPattern.length < 3) {
+      setPatternError("Pattern too short — connect at least 3 dots.");
+      setNewPattern([]);
+      return;
+    }
+    if (drawingPhase === "first") {
+      setFirstPattern([...newPattern]);
+      setNewPattern([]);
+      setDrawingPhase("confirm");
+    } else {
+      if (JSON.stringify(firstPattern) !== JSON.stringify(newPattern)) {
+        setPatternError("Patterns don't match. Try again.");
+        setNewPattern([]);
+        setFirstPattern([]);
+        setDrawingPhase("first");
+        return;
+      }
+      const existing = Storage.getSecurity();
+      Storage.setSecurity({
+        ...(existing ?? {
+          type: "pattern",
+          pin: "",
+          pattern: [],
+          adminPassword: "admin123",
+          securityQA: [],
+          biometricEnabled: false,
+        }),
+        type: "pattern",
+        pattern: newPattern,
+      });
+      setPatternDone(true);
+      toast.success("Pattern updated successfully!");
+      setTimeout(() => handleOpenChange(false), 1200);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full border-primary/30 text-foreground hover:bg-primary/10 transition-colors"
+          data-ocid="profile.change_security.open_modal_button"
+        >
+          <Shield size={16} className="mr-2 text-primary" /> Change Security
+        </Button>
+      </DialogTrigger>
+
+      <DialogContent
+        data-ocid="profile.change_security.dialog"
+        className="bg-card border-border max-w-sm mx-auto rounded-2xl"
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-primary font-display">
+            <Shield size={18} /> Change Security Method
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground text-sm">
+            Switch between PIN and Pattern lock, or update your current
+            credential.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="mb-1">
+          <Label className="text-xs text-muted-foreground uppercase tracking-wider mb-2 block">
+            Security Type
+          </Label>
+          <RadioGroup
+            value={secType}
+            onValueChange={handleSecTypeChange}
+            className="flex gap-4"
+          >
+            <div className="flex items-center gap-2">
+              <RadioGroupItem
+                value="pin"
+                id="sec-pin"
+                data-ocid="profile.change_security.pin.radio"
+              />
+              <Label htmlFor="sec-pin" className="text-sm cursor-pointer">
+                PIN
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <RadioGroupItem
+                value="pattern"
+                id="sec-pattern"
+                data-ocid="profile.change_security.pattern.radio"
+              />
+              <Label htmlFor="sec-pattern" className="text-sm cursor-pointer">
+                Pattern
+              </Label>
+            </div>
+          </RadioGroup>
+        </div>
+
+        <AnimatePresence mode="wait">
+          {secType === "pin" ? (
+            <motion.div
+              key="pin-form"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col gap-3"
+            >
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">
+                  New PIN (6 digits)
+                </Label>
+                <Input
+                  data-ocid="profile.change_security.pin.input"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={newPin}
+                  onChange={(e) =>
+                    setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  placeholder="••••••"
+                  className="tracking-widest text-center h-10"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs text-muted-foreground">
+                  Confirm New PIN
+                </Label>
+                <Input
+                  data-ocid="profile.change_security.pin.confirm.input"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={confirmPin}
+                  onChange={(e) =>
+                    setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  placeholder="••••••"
+                  className="tracking-widest text-center h-10"
+                />
+              </div>
+              {pinError && (
+                <p className="text-destructive text-xs">{pinError}</p>
+              )}
+            </motion.div>
+          ) : (
+            <motion.div
+              key="pattern-form"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center gap-3"
+            >
+              {patternDone ? (
+                <motion.p
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="text-sm font-medium text-primary text-center py-4"
+                >
+                  ✓ Pattern saved!
+                </motion.p>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground text-center">
+                    {drawingPhase === "first"
+                      ? "Draw a new pattern (min 3 dots)"
+                      : "Draw it again to confirm"}
+                  </p>
+                  <div
+                    ref={gridRef}
+                    className="grid grid-cols-3 gap-8 p-4 select-none touch-none"
+                    onMouseDown={startDraw}
+                    onMouseMove={moveDraw}
+                    onMouseUp={endDraw}
+                    onMouseLeave={() => {
+                      if (isDrawing) endDraw();
+                    }}
+                    onTouchStart={startDraw}
+                    onTouchMove={moveDraw}
+                    onTouchEnd={endDraw}
+                  >
+                    {PATTERN_POSITIONS.map((pos) => (
+                      <div
+                        key={`csdot-${pos}`}
+                        className={`pattern-dot ${
+                          newPattern.includes(pos) ? "selected" : ""
+                        }`}
+                      >
+                        {newPattern.includes(pos) && (
+                          <span className="text-xs font-bold text-primary-foreground">
+                            {newPattern.indexOf(pos) + 1}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {patternError && (
+                    <p className="text-destructive text-xs text-center">
+                      {patternError}
+                    </p>
+                  )}
+                </>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <DialogFooter className="flex gap-2 pt-1">
+          <Button
+            type="button"
+            variant="outline"
+            className="flex-1"
+            onClick={() => handleOpenChange(false)}
+            data-ocid="profile.change_security.cancel_button"
+          >
+            Cancel
+          </Button>
+          {secType === "pin" && (
+            <Button
+              type="button"
+              className="flex-1 vpay-btn-primary"
+              onClick={handleSavePin}
+              data-ocid="profile.change_security.save_button"
+            >
+              Save PIN
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LocalBackupSection() {
+  const [lastBackupTime, setLastBackupTime] = useState<number | null>(
+    Storage.getLocalBackupTime(),
+  );
+  const [justSaved, setJustSaved] = useState(false);
+
+  const formatTime = (ts: number | null) => {
+    if (!ts) return "Auto-save pending";
+    return new Date(ts).toLocaleString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const handleManualBackup = () => {
+    Storage.saveLocalBackup();
+    const now = Storage.getLocalBackupTime();
+    setLastBackupTime(now);
+    setJustSaved(true);
+    toast.success("Backup saved to device storage!");
+    setTimeout(() => setJustSaved(false), 3000);
+  };
+
+  return (
+    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <DatabaseBackup size={18} className="text-primary" />
+          <p className="text-sm font-semibold">Local Backup</p>
+        </div>
+        <Badge
+          variant="outline"
+          className="text-xs border-primary/30 text-primary"
+        >
+          Auto-Save ON
+        </Badge>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Your V balance, transactions, and account data are automatically saved
+        to this device's storage on every change. Tap Backup Now to save a
+        manual snapshot anytime.
+      </p>
+
+      <div className="flex items-center gap-2 text-xs">
+        <CheckCircle size={13} className="text-green-500 flex-shrink-0" />
+        <span className="text-muted-foreground">
+          Last saved:{" "}
+          <span className="text-foreground font-medium">
+            {formatTime(lastBackupTime)}
+          </span>
+        </span>
+      </div>
+
+      <Button
+        data-ocid="profile.local_backup.button"
+        type="button"
+        size="sm"
+        className="vpay-btn-primary w-full"
+        onClick={handleManualBackup}
+      >
+        {justSaved ? (
+          <span className="flex items-center gap-2">
+            <CheckCircle size={14} /> Saved!
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <DatabaseBackup size={14} /> Backup Now
+          </span>
+        )}
+      </Button>
+    </div>
+  );
+}
+
+export default function ProfileScreen({ onBack, onLogout }: Props) {
   const [editing, setEditing] = useState(false);
   const [user, setUser] = useState(Storage.getUser()!);
   const [name, setName] = useState(user.name);
@@ -115,7 +571,7 @@ export default function ProfileScreen({ onBack }: Props) {
               variant="outline"
               className="mt-1 text-xs border-primary/30 text-primary"
             >
-              {user.storageChoice === "gdrive" ? "☁ Google Drive" : "💾 Local"}
+              💾 Local Storage
             </Badge>
           </div>
         </div>
@@ -248,6 +704,53 @@ export default function ProfileScreen({ onBack }: Props) {
             <Save size={16} className="mr-2" /> Save Profile
           </Button>
         )}
+
+        {/* Local Backup */}
+        <div className="mt-6">
+          <LocalBackupSection />
+        </div>
+
+        {/* Change Security */}
+        <div className="mt-4 mb-3">
+          <ChangeSecurityDialog />
+        </div>
+
+        {/* Log Out */}
+        <div className="mb-6">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground transition-colors"
+                data-ocid="profile.delete_button"
+              >
+                <LogOut size={16} className="mr-2" /> Log Out
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent data-ocid="profile.dialog">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Log out of V-PAY?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to log out? You will need to enter your
+                  PIN to access your account again.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel data-ocid="profile.cancel_button">
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={onLogout}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  data-ocid="profile.confirm_button"
+                >
+                  Log Out
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </motion.div>
     </div>
   );

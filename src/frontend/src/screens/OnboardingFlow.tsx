@@ -2,14 +2,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { createActorWithConfig } from "@/config";
 import { Storage, type VPaySecurity, type VPayUser } from "@/lib/storage";
 import {
   Check,
   ChevronRight,
   HardDrive,
+  KeyRound,
   Plus,
   Shield,
   Upload,
+  UserPlus,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -30,6 +33,10 @@ const RECOVERY_QUESTIONS = [
 ];
 
 export default function OnboardingFlow({ onComplete }: Props) {
+  const [showWelcome, setShowWelcome] = useState(true);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recPhone, setRecPhone] = useState("");
+  const [recEmail, setRecEmail] = useState("");
   const [step, setStep] = useState(0);
   const [email, setEmail] = useState("");
   const [storageChoice, setStorageChoice] = useState<"local" | "gdrive">(
@@ -51,6 +58,8 @@ export default function OnboardingFlow({ onComplete }: Props) {
     "",
     "",
   ]);
+  const [recoveryPasskey, setRecoveryPasskey] = useState("");
+  const [confirmRecoveryPasskey, setConfirmRecoveryPasskey] = useState("");
   const gridRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -116,6 +125,14 @@ export default function OnboardingFlow({ onComplete }: Props) {
       toast.error("Please answer all recovery questions");
       return;
     }
+    if (recoveryPasskey.length !== 6) {
+      toast.error("Recovery passkey must be exactly 6 digits");
+      return;
+    }
+    if (recoveryPasskey !== confirmRecoveryPasskey) {
+      toast.error("Passkeys do not match");
+      return;
+    }
 
     const user: VPayUser = {
       email,
@@ -139,10 +156,13 @@ export default function OnboardingFlow({ onComplete }: Props) {
         { q: RECOVERY_QUESTIONS[2], a: securityAnswers[2].trim() },
       ],
       biometricEnabled: false,
+      recoveryPasskey,
     };
     Storage.setUser(user);
     Storage.setSecurity(sec);
     Storage.addOrUpdateUser(user);
+    // Save full record for account recovery after reinstall/reset
+    Storage.saveUserRecord(user, sec);
     const bal = Storage.getBalance();
     if (!bal[phone]) {
       bal[phone] = 0;
@@ -151,6 +171,203 @@ export default function OnboardingFlow({ onComplete }: Props) {
     setStep(5);
     setTimeout(onComplete, 1500);
   };
+
+  // Welcome screen — shown before normal onboarding steps
+  if (showWelcome) {
+    return (
+      <div className="vpay-screen bg-background flex flex-col px-6 py-10">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col flex-1"
+        >
+          <div className="flex-1 flex flex-col items-center justify-center">
+            <h1 className="text-5xl font-display font-bold text-primary mb-2">
+              V-PAY
+            </h1>
+            <p className="text-muted-foreground text-center mb-12">
+              Digital currency for the future
+            </p>
+            <div className="w-full flex flex-col gap-4">
+              <button
+                type="button"
+                data-ocid="welcome.new_account.button"
+                onClick={() => setShowWelcome(false)}
+                className="w-full flex items-center gap-4 p-5 rounded-2xl border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-all text-left"
+              >
+                <div className="w-12 h-12 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
+                  <UserPlus size={24} className="text-primary" />
+                </div>
+                <div>
+                  <p className="font-semibold">New Account</p>
+                  <p className="text-muted-foreground text-xs mt-0.5">
+                    Set up V-PAY for the first time
+                  </p>
+                </div>
+              </button>
+              <button
+                type="button"
+                data-ocid="welcome.recover_account.button"
+                onClick={() => setShowRecovery(true)}
+                className="w-full flex items-center gap-4 p-5 rounded-2xl border border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 transition-all text-left"
+              >
+                <div className="w-12 h-12 rounded-xl bg-amber-500/15 flex items-center justify-center flex-shrink-0">
+                  <KeyRound size={24} className="text-amber-500" />
+                </div>
+                <div>
+                  <p className="font-semibold">Recover Old Account</p>
+                  <p className="text-muted-foreground text-xs mt-0.5">
+                    Restore your existing V-PAY account
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Recovery screen
+  if (showRecovery) {
+    const handleRecover = async () => {
+      if (!recPhone.trim() || !recEmail.trim()) {
+        toast.error("Please enter both phone number and email.");
+        return;
+      }
+
+      const record = Storage.findUserRecord(recPhone, recEmail);
+
+      if (!record) {
+        // If local not found, try cloud
+        try {
+          const actor = await createActorWithConfig();
+          const cloudUser = await actor.getUser(recPhone.trim());
+          if (cloudUser && cloudUser.phone === recPhone.trim()) {
+            // Found in cloud -- set up basic account
+            const basicUser: VPayUser = {
+              email: recEmail.trim(),
+              name: cloudUser.name,
+              phone: cloudUser.phone,
+              birthdate: "",
+              bio: "",
+              links: [],
+              photoBase64: "",
+              setupDone: true,
+              storageChoice: "local",
+            };
+            Storage.setUser(basicUser);
+            Storage.addOrUpdateUser(basicUser);
+            const bal = Storage.getBalance();
+            if (!bal[cloudUser.phone]) bal[cloudUser.phone] = 0;
+            Storage.setBalance(bal);
+            toast.success("Account recovered from cloud server!");
+            setTimeout(onComplete, 1000);
+            return;
+          }
+        } catch {
+          // cloud lookup failed, fall through to error
+        }
+        toast.error(
+          "No matching account found. Check your phone number and email.",
+        );
+        return;
+      }
+
+      // Restore user and security
+      // Restore user data directly without triggering auto-sync loops
+      localStorage.setItem(
+        "vpay_user",
+        JSON.stringify({ ...record.user, setupDone: true }),
+      );
+      localStorage.setItem("vpay_security", JSON.stringify(record.sec));
+
+      // Restore balance
+      const bal = Storage.getBalance();
+      bal[record.user.phone] = record.balance;
+      localStorage.setItem("vpay_balance", JSON.stringify(bal));
+
+      // Restore transactions (merge, keeping the recovered user's transactions)
+      if (record.transactions && record.transactions.length > 0) {
+        const existing = Storage.getTransactions();
+        const existingIds = new Set(existing.map((t) => t.id));
+        const merged = [...existing];
+        for (const tx of record.transactions) {
+          if (!existingIds.has(tx.id)) merged.push(tx);
+        }
+        merged.sort((a, b) => b.timestamp - a.timestamp);
+        localStorage.setItem(
+          "vpay_transactions",
+          JSON.stringify(merged.slice(0, 500)),
+        );
+      }
+
+      // Add to users list
+      Storage.addOrUpdateUser({ ...record.user, setupDone: true });
+
+      toast.success("Account recovered successfully!");
+      setTimeout(onComplete, 1000);
+    };
+
+    return (
+      <div className="vpay-screen bg-background flex flex-col px-6 py-10">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col flex-1"
+        >
+          <button
+            type="button"
+            onClick={() => setShowRecovery(false)}
+            className="flex items-center gap-2 text-muted-foreground mb-8 hover:text-foreground transition-colors"
+          >
+            <X size={18} /> Back
+          </button>
+          <div className="flex-1 flex flex-col justify-center">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/15 flex items-center justify-center mb-6">
+              <KeyRound size={28} className="text-amber-500" />
+            </div>
+            <h2 className="text-3xl font-display font-bold mb-2">
+              Recover Account
+            </h2>
+            <p className="text-muted-foreground text-sm mb-8">
+              Enter your registered phone number and email to restore your old
+              V-PAY account.
+            </p>
+            <div className="flex flex-col gap-4">
+              <div>
+                <Label className="mb-1 block text-xs">Phone Number</Label>
+                <Input
+                  data-ocid="recovery.phone_input"
+                  type="tel"
+                  placeholder="Registered phone number"
+                  value={recPhone}
+                  onChange={(e) => setRecPhone(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="mb-1 block text-xs">Email</Label>
+                <Input
+                  data-ocid="recovery.email_input"
+                  type="email"
+                  placeholder="Registered email address"
+                  value={recEmail}
+                  onChange={(e) => setRecEmail(e.target.value)}
+                />
+              </div>
+              <Button
+                data-ocid="recovery.submit_button"
+                className="w-full mt-2"
+                onClick={handleRecover}
+              >
+                Recover Account
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="vpay-screen bg-background flex flex-col px-6 py-8">
@@ -415,14 +632,22 @@ export default function OnboardingFlow({ onComplete }: Props) {
               <button
                 type="button"
                 onClick={() => setSecType("pin")}
-                className={`flex-1 py-3 rounded-xl text-sm font-medium transition-all border ${secType === "pin" ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"}`}
+                className={`flex-1 py-3 rounded-xl text-sm font-medium transition-all border ${
+                  secType === "pin"
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border text-muted-foreground"
+                }`}
               >
                 PIN (6 digit)
               </button>
               <button
                 type="button"
                 onClick={() => setSecType("pattern")}
-                className={`flex-1 py-3 rounded-xl text-sm font-medium transition-all border ${secType === "pattern" ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"}`}
+                className={`flex-1 py-3 rounded-xl text-sm font-medium transition-all border ${
+                  secType === "pattern"
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border text-muted-foreground"
+                }`}
               >
                 Pattern
               </button>
@@ -465,7 +690,7 @@ export default function OnboardingFlow({ onComplete }: Props) {
                 </p>
                 <div
                   ref={gridRef}
-                  className="grid grid-cols-3 gap-6 p-4 select-none touch-none"
+                  className="grid grid-cols-3 gap-8 p-4 select-none touch-none"
                   onMouseDown={startDraw}
                   onMouseMove={moveDraw}
                   onMouseUp={() => setIsDrawing(false)}
@@ -541,6 +766,52 @@ export default function OnboardingFlow({ onComplete }: Props) {
                 </p>
               </div>
             </div>
+
+            {/* 6-digit Recovery Passkey */}
+            <div className="flex flex-col gap-3 p-4 rounded-xl bg-muted/40 border border-border">
+              <p className="text-sm font-semibold text-foreground">
+                Set a 6-digit Recovery Passkey
+              </p>
+              <p className="text-xs text-muted-foreground">
+                This passkey is required along with your phone, email, and date
+                of birth to reset your PIN.
+              </p>
+              <div>
+                <Label className="mb-1 block text-xs">Recovery Passkey</Label>
+                <Input
+                  data-ocid="recovery_setup.passkey_input"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="••••••"
+                  value={recoveryPasskey}
+                  onChange={(e) =>
+                    setRecoveryPasskey(
+                      e.target.value.replace(/\D/g, "").slice(0, 6),
+                    )
+                  }
+                  className="bg-input text-center text-2xl tracking-widest"
+                />
+              </div>
+              <div>
+                <Label className="mb-1 block text-xs">Confirm Passkey</Label>
+                <Input
+                  data-ocid="recovery_setup.passkey_confirm_input"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="••••••"
+                  value={confirmRecoveryPasskey}
+                  onChange={(e) =>
+                    setConfirmRecoveryPasskey(
+                      e.target.value.replace(/\D/g, "").slice(0, 6),
+                    )
+                  }
+                  className="bg-input text-center text-2xl tracking-widest"
+                />
+              </div>
+            </div>
+
             <div className="flex flex-col gap-4">
               {RECOVERY_QUESTIONS.map((question, i) => (
                 <div key={question} className="flex flex-col gap-1.5">

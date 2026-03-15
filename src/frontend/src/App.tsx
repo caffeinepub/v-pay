@@ -92,7 +92,10 @@ export default function App() {
         <History onBack={() => setScreen("dashboard")} />
       )}
       {screen === "profile" && (
-        <ProfileScreen onBack={() => setScreen("dashboard")} />
+        <ProfileScreen
+          onBack={() => setScreen("dashboard")}
+          onLogout={handleLogout}
+        />
       )}
       {screen === "adminError" && (
         <AdminError
