@@ -26,8 +26,10 @@ type Screen =
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("onboarding");
-  const [scannedPhone, setScannedPhone] = useState<string | undefined>();
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const [scannedPhone, setScannedPhone] = useState<string | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     const user = Storage.getUser();
@@ -55,7 +57,13 @@ export default function App() {
 
   const navigate = (s: Screen) => setScreen(s);
 
-  const handleQRScan = (phone: string) => {
+  const handleQRScan = (value: string) => {
+    // QR code may contain a phone number directly or a vpay:// URI
+    let phone = value.trim();
+    if (phone.startsWith("vpay://pay?")) {
+      const params = new URLSearchParams(phone.replace("vpay://pay?", ""));
+      phone = params.get("phone") ?? phone;
+    }
     setScannedPhone(phone);
     setScreen("sendV");
   };
@@ -81,13 +89,13 @@ export default function App() {
           }}
         />
       )}
-      {screen === "myQR" && <MyQR onBack={() => setScreen("dashboard")} />}
       {screen === "scanner" && (
         <QRScanner
           onScan={handleQRScan}
           onBack={() => setScreen("dashboard")}
         />
       )}
+      {screen === "myQR" && <MyQR onBack={() => setScreen("dashboard")} />}
       {screen === "history" && (
         <History onBack={() => setScreen("dashboard")} />
       )}

@@ -1,8 +1,6 @@
 import { Button } from "@/components/ui/button";
-import { useQRScanner } from "@/qr-code/useQRScanner";
-import { ArrowLeft, Camera, FlipHorizontal } from "lucide-react";
-import { motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Camera, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface Props {
   onScan: (phone: string) => void;
@@ -10,266 +8,281 @@ interface Props {
 }
 
 export default function QRScanner({ onScan, onBack }: Props) {
-  const {
-    qrResults,
-    isScanning,
-    isActive,
-    isSupported,
-    error,
-    isLoading,
-    canStartScanning,
-    startScanning,
-    stopScanning,
-    switchCamera,
-    videoRef,
-    canvasRef,
-  } = useQRScanner({
-    facingMode: "environment",
-    scanInterval: 200,
-    maxResults: 1,
-  });
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+  const scannedRef = useRef(false);
 
-  const handledRef = useRef(false);
-  const [permissionDenied, setPermissionDenied] = useState(false);
-  const [retrying, setRetrying] = useState(false);
-  const retryCountRef = useRef(0);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [status, setStatus] = useState<
+    "loading" | "active" | "denied" | "error"
+  >("loading");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [jsqrReady, setJsqrReady] = useState(!!(window as any).jsQR);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: start on mount only
+  // Load jsQR from CDN
   useEffect(() => {
-    startScanning();
-    return () => {
-      stopScanning();
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    if ((window as any).jsQR) {
+      setJsqrReady(true);
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+    s.onload = () => {
+      if (mountedRef.current) setJsqrReady(true);
     };
+    s.onerror = () => {
+      if (mountedRef.current) {
+        setStatus("error");
+        setErrorMsg("Scanner library load failed");
+      }
+    };
+    document.head.appendChild(s);
   }, []);
 
-  // Detect permission denied error and auto-retry up to 5 times
-  useEffect(() => {
-    if (error) {
-      const msg = error.message?.toLowerCase() || "";
-      if (
-        msg.includes("permission") ||
-        msg.includes("denied") ||
-        msg.includes("notallowed") ||
-        msg.includes("not allowed")
-      ) {
-        setPermissionDenied(true);
-        // Auto-retry loop
-        if (retryCountRef.current < 5) {
-          retryCountRef.current += 1;
-          retryTimerRef.current = setTimeout(async () => {
-            try {
-              await navigator.mediaDevices.getUserMedia({ video: true });
-            } catch {
-              // still denied
-            }
-            startScanning();
-          }, 2000);
-        }
-      }
-    } else {
-      setPermissionDenied(false);
-      retryCountRef.current = 0;
+  const stopStream = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
-  }, [error, startScanning]);
+    if (streamRef.current) {
+      for (const t of streamRef.current.getTracks()) t.stop();
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+  }, []);
 
-  const handleRequestPermission = async () => {
-    setRetrying(true);
-    setPermissionDenied(false);
-    retryCountRef.current = 0;
-    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+  const startCamera = useCallback(async () => {
+    if (!mountedRef.current) return;
+    setStatus("loading");
+    scannedRef.current = false;
+
     try {
-      await navigator.mediaDevices.getUserMedia({ video: true });
-    } catch {
-      // permission still denied
-    }
-    const success = await startScanning();
-    if (!success && !isActive) {
-      // Still no camera - show informative message
-      setPermissionDenied(true);
-    }
-    setRetrying(false);
-  };
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: handle scan once
+      if (!mountedRef.current) {
+        for (const t of stream.getTracks()) t.stop();
+        return;
+      }
+
+      streamRef.current = stream;
+      const video = videoRef.current!;
+      video.srcObject = stream;
+
+      await new Promise<void>((resolve) => {
+        video.onloadedmetadata = () => resolve();
+        setTimeout(() => resolve(), 3000);
+      });
+
+      try {
+        await video.play();
+      } catch (_) {
+        /* autoplay may be blocked */
+      }
+      if (!mountedRef.current) return;
+      setStatus("active");
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      const e = err as { name?: string; message?: string };
+      if (
+        e?.name === "NotAllowedError" ||
+        e?.name === "PermissionDeniedError"
+      ) {
+        setStatus("denied");
+      } else {
+        setStatus("error");
+        setErrorMsg(e?.message || "Camera could not be started");
+      }
+    }
+  }, []);
+
+  // Scan loop
   useEffect(() => {
-    if (qrResults.length > 0 && !handledRef.current) {
-      handledRef.current = true;
-      const data = qrResults[0].data;
-      stopScanning();
-      onScan(data);
-    }
-  }, [qrResults]);
+    if (status !== "active" || !jsqrReady) return;
 
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const jsQR = (window as any).jsQR as
+      | ((
+          data: Uint8ClampedArray,
+          width: number,
+          height: number,
+        ) => { data: string } | null)
+      | undefined;
+    if (!jsQR) return;
 
-  const isPermissionError =
-    permissionDenied ||
-    (!!error &&
-      (() => {
-        const msg = error.message?.toLowerCase() || "";
-        return (
-          msg.includes("permission") ||
-          msg.includes("denied") ||
-          msg.includes("notallowed") ||
-          msg.includes("not allowed")
-        );
-      })());
+    const scan = () => {
+      if (!mountedRef.current || scannedRef.current) return;
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas || video.readyState < video.HAVE_ENOUGH_DATA) {
+        rafRef.current = requestAnimationFrame(scan);
+        return;
+      }
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        rafRef.current = requestAnimationFrame(scan);
+        return;
+      }
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const result = jsQR(imgData.data, imgData.width, imgData.height);
+      if (result?.data) {
+        scannedRef.current = true;
+        stopStream();
+        onScan(result.data);
+        return;
+      }
+      rafRef.current = requestAnimationFrame(scan);
+    };
+
+    rafRef.current = requestAnimationFrame(scan);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [status, jsqrReady, stopStream, onScan]);
+
+  // Start camera when jsQR is ready
+  useEffect(() => {
+    if (jsqrReady) startCamera();
+  }, [jsqrReady, startCamera]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      stopStream();
+    };
+  }, [stopStream]);
+
+  const handleBack = () => {
+    stopStream();
+    onBack();
+  };
 
   return (
     <div className="vpay-screen bg-background flex flex-col">
       <div className="flex items-center gap-3 px-5 pt-6 pb-4">
         <button
           type="button"
-          onClick={onBack}
+          onClick={handleBack}
           className="text-muted-foreground hover:text-foreground"
+          data-ocid="scanner.secondary_button"
         >
           <ArrowLeft size={20} />
         </button>
-        <h2 className="text-xl font-display font-bold">Scan QR Code</h2>
+        <h2 className="text-xl font-display font-bold">Scan & Pay</h2>
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center px-5">
-        {isSupported === false ? (
-          <div className="text-center" data-ocid="scanner.error_state">
-            <p className="text-destructive mb-4">
-              Camera not supported on this device.
-            </p>
-            <Button type="button" onClick={onBack}>
-              Go Back
-            </Button>
-          </div>
-        ) : isPermissionError ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-sm text-center"
-            data-ocid="scanner.error_state"
+        <div className="w-full max-w-sm">
+          <div
+            className="relative rounded-2xl overflow-hidden bg-black"
+            style={{ aspectRatio: "4/3" }}
           >
-            <div className="flex flex-col items-center gap-5 p-6 rounded-2xl border border-border bg-muted/40">
-              <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center">
-                <Camera size={32} className="text-destructive" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-lg mb-1">
-                  Camera Permission Required
-                </h3>
-                <p className="text-muted-foreground text-sm">
-                  V-PAY needs camera access to scan QR codes. Please allow
-                  camera permission when prompted.
-                </p>
-                {retryCountRef.current > 0 && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Auto-retrying... ({retryCountRef.current}/5 attempts)
-                  </p>
-                )}
-              </div>
-              <Button
-                type="button"
-                className="w-full vpay-btn-primary"
-                onClick={handleRequestPermission}
-                disabled={retrying}
-                data-ocid="scanner.primary_button"
-              >
-                {retrying ? "Requesting..." : "Allow Camera Access"}
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                If the browser does not prompt, open your browser settings and
-                enable camera permission for this site.
-              </p>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-sm"
-          >
-            <div className="relative aspect-square rounded-2xl overflow-hidden bg-muted border border-border">
-              <video
-                ref={videoRef}
-                className="w-full h-full object-cover"
-                autoPlay
-                playsInline
-                muted
-              />
-              <canvas ref={canvasRef} className="hidden" />
+            {/* Video always in DOM */}
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+              style={{ display: status === "active" ? "block" : "none" }}
+            />
+            <canvas ref={canvasRef} className="hidden" />
 
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-48 h-48 relative">
-                  <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-primary rounded-tl-lg" />
-                  <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-primary rounded-tr-lg" />
-                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-primary rounded-bl-lg" />
-                  <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-primary rounded-br-lg" />
-                  {isScanning && (
-                    <motion.div
-                      className="absolute left-2 right-2 h-0.5 bg-primary"
-                      animate={{ top: ["10%", "90%", "10%"] }}
-                      transition={{
-                        duration: 2,
-                        repeat: Number.POSITIVE_INFINITY,
-                        ease: "linear",
-                      }}
-                    />
-                  )}
-                </div>
-              </div>
-
-              {isLoading && (
-                <div className="absolute inset-0 flex items-center justify-center bg-background/50">
-                  <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                </div>
-              )}
-            </div>
-
-            {error && !isPermissionError && (
+            {/* Loading */}
+            {status === "loading" && (
               <div
-                className="mt-3 text-center text-destructive text-sm"
-                data-ocid="scanner.error_state"
+                className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3"
+                data-ocid="scanner.loading_state"
               >
-                {error.message}
+                <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm text-white/70">Starting camera...</p>
               </div>
             )}
 
-            <p className="text-center text-muted-foreground text-sm mt-4">
-              {isScanning ? "Scanning for QR code..." : "Camera ready"}
-            </p>
+            {/* Scan frame overlay */}
+            {status === "active" && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-52 h-52 border-2 border-white/80 rounded-xl" />
+              </div>
+            )}
 
-            <div className="flex gap-3 mt-4">
-              {!isActive && canStartScanning && (
+            {/* Permission denied */}
+            {status === "denied" && (
+              <div
+                className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 p-6 gap-4 text-center"
+                data-ocid="scanner.error_state"
+              >
+                <div className="w-16 h-16 rounded-full bg-yellow-500/20 flex items-center justify-center">
+                  <Camera size={28} className="text-yellow-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white text-base mb-1">
+                    Camera Permission Required
+                  </h3>
+                  <p className="text-xs text-white/60">
+                    Browser settings se camera permission allow karein, phir
+                    retry karein.
+                  </p>
+                </div>
                 <Button
                   type="button"
-                  className="flex-1 vpay-btn-primary"
-                  onClick={startScanning}
+                  className="w-full vpay-btn-primary"
+                  onClick={startCamera}
+                  data-ocid="scanner.primary_button"
                 >
-                  Start Camera
+                  <RefreshCw size={16} className="mr-2" /> Allow & Retry
                 </Button>
-              )}
-              {isActive && (
+              </div>
+            )}
+
+            {/* Generic error */}
+            {status === "error" && (
+              <div
+                className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 p-6 gap-4 text-center"
+                data-ocid="scanner.error_state"
+              >
+                <div className="w-16 h-16 rounded-full bg-destructive/20 flex items-center justify-center">
+                  <Camera size={28} className="text-destructive" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white text-base mb-1">
+                    Camera Error
+                  </h3>
+                  <p className="text-xs text-white/60">
+                    {errorMsg || "Camera start nahi ho paaya"}
+                  </p>
+                </div>
                 <Button
                   type="button"
-                  variant="outline"
-                  className="flex-1 border-border"
-                  onClick={stopScanning}
+                  className="w-full vpay-btn-primary"
+                  onClick={startCamera}
+                  data-ocid="scanner.primary_button"
                 >
-                  Stop
+                  <RefreshCw size={16} className="mr-2" /> Try Again
                 </Button>
-              )}
-              {isMobile && isActive && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="border-border"
-                  onClick={switchCamera}
-                >
-                  <FlipHorizontal size={18} />
-                </Button>
-              )}
-            </div>
-          </motion.div>
-        )}
+              </div>
+            )}
+          </div>
+
+          <p className="text-center text-muted-foreground text-sm mt-4">
+            {status === "active"
+              ? "QR code ke saamne camera rakho"
+              : status === "loading"
+                ? "Camera shuru ho raha hai..."
+                : "Camera error"}
+          </p>
+        </div>
       </div>
     </div>
   );

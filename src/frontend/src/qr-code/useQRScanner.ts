@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type CameraConfig, useCamera } from "../camera/useCamera";
 
-declare global {
-  interface Window {
-    jsQR: any;
-  }
-}
-
 export interface QRResult {
   data: string;
   timestamp: number;
@@ -38,7 +32,7 @@ export const useQRScanner = (config: QRScannerConfig) => {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.jsQR) {
+    if ((window as any).jsQR) {
       setJsQRLoaded(true);
       return;
     }
@@ -68,11 +62,12 @@ export const useQRScanner = (config: QRScannerConfig) => {
   }, []);
 
   const scanQRCode = useCallback(() => {
+    const jsQR = (window as any).jsQR;
     if (
       !camera.videoRef.current ||
       !camera.canvasRef.current ||
       !jsQRLoaded ||
-      !window.jsQR
+      !jsQR
     ) {
       return;
     }
@@ -86,7 +81,7 @@ export const useQRScanner = (config: QRScannerConfig) => {
     canvas.height = video.videoHeight;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const code = window.jsQR(imageData.data, imageData.width, imageData.height);
+    const code = jsQR(imageData.data, imageData.width, imageData.height);
     if (code?.data && code.data !== lastScanRef.current) {
       lastScanRef.current = code.data;
       const newResult: QRResult = {
@@ -124,7 +119,6 @@ export const useQRScanner = (config: QRScannerConfig) => {
       }
       return false;
     }
-
     setIsScanning(true);
     return true;
   }, [camera.isActive, camera.startCamera]);
@@ -154,31 +148,22 @@ export const useQRScanner = (config: QRScannerConfig) => {
   }, [clearResults]);
 
   return {
-    // QR Scanner state
     qrResults,
     isScanning,
     jsQRLoaded,
-
-    // Camera state (pass-through)
     isActive: camera.isActive,
     isSupported: camera.isSupported,
     error: camera.error,
     isLoading: camera.isLoading,
     currentFacingMode: camera.currentFacingMode,
-
-    // Actions
     startScanning,
     stopScanning,
     switchCamera,
     clearResults,
     reset,
     retry: camera.retry,
-
-    // Refs for components
     videoRef: camera.videoRef,
     canvasRef: camera.canvasRef,
-
-    // Computed state
     isReady: jsQRLoaded && camera.isSupported !== false,
     canStartScanning:
       jsQRLoaded && camera.isSupported === true && !camera.isLoading,

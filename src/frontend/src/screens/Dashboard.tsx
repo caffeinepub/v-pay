@@ -82,18 +82,18 @@ export default function Dashboard({ onNavigate, onLogout }: Props) {
       onClick: () => toast.info("Calls coming soon"),
     },
     {
-      id: "scan",
-      label: "Scan QR",
-      icon: ScanLine,
-      ocid: "dashboard.scan_button",
-      onClick: () => onNavigate("scanner"),
-    },
-    {
       id: "myqr",
       label: "My QR",
       icon: QrCode,
       ocid: "dashboard.myqr_button",
       onClick: () => onNavigate("myQR"),
+    },
+    {
+      id: "scan",
+      label: "Scan & Pay",
+      icon: ScanLine,
+      ocid: "dashboard.scan_button",
+      onClick: () => onNavigate("scanner"),
     },
     {
       id: "send",
@@ -173,7 +173,11 @@ export default function Dashboard({ onNavigate, onLogout }: Props) {
           <p className="text-xs text-muted-foreground mt-2">{user?.phone}</p>
           <div className="mt-3 flex items-center gap-2">
             <span
-              className={`text-xs px-2 py-0.5 rounded-full ${user?.storageChoice === "gdrive" ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
+              className={`text-xs px-2 py-0.5 rounded-full ${
+                user?.storageChoice === "gdrive"
+                  ? "bg-primary/20 text-primary"
+                  : "bg-muted text-muted-foreground"
+              }`}
             >
               {user?.storageChoice === "gdrive"
                 ? "☁ Google Drive"
